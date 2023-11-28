@@ -1,0 +1,274 @@
+
+
+drop TRIGGER update_date_users;
+drop TRIGGER check_buy_sell;
+drop procedure add_users;
+drop procedure add_stock_exchange;
+drop procedure add_offer_to_sell;
+drop procedure add_yearly_revenue;
+drop table owned_stock;
+drop table buy_sell;
+drop table offer_to_sell;
+drop table yearly_revenue;
+drop table Stock_Exchange;
+drop table users;
+drop table company_stock;
+
+set pagesize 300;
+set line size 400;
+
+create table Stock_Exchange(
+	exchange_id varchar(20) not null,
+	exchange_name varchar(40),
+	opening_time varchar(10) DEFAULT '10:00 AM',--USED DEFAULT
+	closing_time varchar(10),
+        primary key(exchange_id));
+
+create table users(
+	user_id varchar(20) not null,
+        name varchar(20),
+	ac_no number(20),
+	balance number(20,2) CHECK (balance>0),--USED CHECK 
+	reg_date Date,
+	primary key(user_id));
+
+create table company_stock(
+	company_id varchar(20) NOT NULL,
+	company_name varchar(20),
+	PRIMARY KEY (company_id));
+
+create table offer_to_sell(
+	exchange_id varchar(20) NOT NULL,
+	company_id varchar(20) NOT NULL,
+	Price number(10,3),
+	volume number(10),
+	PRIMARY KEY (exchange_id, company_id),
+	foreign key (company_id) REFERENCES company_stock (company_id) on DELETE CASCADE,
+	foreign key (exchange_id) REFERENCES stock_exchange (exchange_id) on DELETE CASCADE);
+
+create table buy_sell(
+	user_id varchar(20) NOT NULL,
+	exchange_id varchar(20) NOT NULL,
+	primary key (user_id,exchange_id),
+        foreign key (user_id) REFERENCES users (user_id) on DELETE CASCADE,
+	foreign key (exchange_id) REFERENCES stock_exchange (exchange_id) on DELETE CASCADE);
+
+create table yearly_revenue(
+	amount number(20,3),
+	user_id varchar(20) NOT NULL,
+	company_id varchar(20)NOT NULL,
+	exchange_id varchar(20) NOT NULL,
+	PRIMARY KEY (user_id, company_id,exchange_id),
+	foreign key (user_id) REFERENCES users (user_id) on DELETE CASCADE,
+	foreign key (company_id) REFERENCES company_stock (company_id) on DELETE CASCADE,
+	foreign key (exchange_id) REFERENCES stock_exchange(exchange_id) on DELETE CASCADE);
+
+Create Table Owned_stock(
+	company_name varchar(20),
+	quantity number(20),
+	buy_price number(20),
+	user_id varchar(20) NOT NULL,
+	exchange_id varchar(20) NOT NULL,
+	company_id varchar(20) NOT NULL,
+	PRIMARY KEY (user_id, company_id,exchange_id),
+	foreign key (user_id) REFERENCES users (user_id) on DELETE CASCADE,
+	foreign key (company_id) REFERENCES company_stock (company_id) on DELETE CASCADE,
+	foreign key (exchange_id) REFERENCES stock_exchange (exchange_id) on DELETE CASCADE);
+
+
+CREATE OR REPLACE PROCEDURE add_users(
+user_id1 users.user_id%TYPE,
+name1 users.name%type,
+ac_no1 users.ac_no%type,
+balance1 users.balance%type) IS
+BEGIN
+	INSERT INTO USERS (user_id,name,ac_no,balance) 
+	values (user_id1,name1,ac_no1,balance1);	
+END add_users;
+/
+
+
+CREATE OR REPLACE PROCEDURE add_stock_Exchange(
+exchange_id1 stock_exchange.exchange_id%TYPE,
+ex_name stock_exchange.exchange_name%type,
+open1 stock_exchange.opening_time%TYPE,
+close1 stock_exchange.closing_time%TYPE) IS
+BEGIN
+	INSERT INTO stock_exchange (exchange_id ,exchange_name,opening_time,CLOSING_TIME) 
+	values (exchange_id1,ex_name,open1,close1);
+	
+END add_stock_Exchange;
+/
+
+create or replace procedure add_company_stock(
+id company_stock.company_id%type,
+name company_stock.company_name%type) IS
+BEGIN
+	INSERT into company_stock(company_id,company_name)
+	values (id,name);
+END add_company_stock;
+/
+
+create or replace procedure add_owned_stock(
+name owned_stock.company_name%type,
+quan owned_stock.quantity%type,
+buyPrice owned_stock.buy_price%type,
+uid owned_stock.user_id%type,
+eid owned_stock.exchange_id%type,
+cid owned_stock.company_id%type) IS
+BEGIN
+	Insert into OWNED_STOCK (company_name,quantity,buy_price,user_id,company_id,exchange_id)
+	values (name,quan,buyPrice,uid,cid,eid);
+END add_owned_stock;
+/
+
+CREATE or REPLACE PROCEDURE add_offer_to_sell(
+eid offer_to_sell.exchange_id%type,
+cid offer_to_sell.company_id%type,
+price1 offer_to_sell.Price%type,
+volume1 offer_to_sell.volume%type) IS
+BEGIN
+	INSERT into offer_to_sell (exchange_id,company_id,Price,volume)
+	values(eid,cid,price1,volume1);
+
+
+END add_offer_to_sell;
+/
+
+
+SET SERVEROUTPUT ON
+create or replace procedure add_yearly_revenue(	
+	am1 yearly_revenue.amount%type,
+	uid users.user_id%type,
+	cid company_stock.company_id%type,
+	eid stock_exchange.exchange_id%type) IS
+	--<ADDED LOCAL VARIABLE TO PL/SQL PROCEDURE>
+	c number;
+BEGIN
+--<THIS IS FOR CHECKING IF THE USER HAS STOCK FROM THIS COMPANY>--
+	select count(1) into c from owned_stock where cid=company_id and eid=owned_stock.exchange_id 
+		and uid=owned_stock.user_id;
+	if (c=1) then
+		INSERT into yearly_revenue(amount,user_id,company_id,exchange_id)
+		values(am1,uid,cid,eid);
+	else
+		RAISE_APPLICATION_ERROR(-122,'User does not have stock');
+	end if;
+END add_yearly_revenue;
+/
+
+--THIS TRIGEGR WILL AUTOMATICALLY ADD DATA TO buy_sell table when someone buys/sells stocks;
+CREATE OR REPLACE TRIGGER check_buy_sell BEFORE INSERT OR UPDATE ON
+owned_stock
+FOR EACH ROW
+DECLARE
+c number;
+BEGIN
+	select count(1) into c from buy_sell 
+		where :new.user_id=buy_sell.user_id and :new.exchange_id=buy_sell.exchange_id;
+	if(c=0) then
+	INSERT INTO buy_sell(user_id,exchange_id) values (:new.user_id,:new.exchange_id);
+	end if;
+END;
+/
+
+
+-- Automatically Insert The Register Date in User Table
+create or REPLACE TRIGGER update_date_users BEFORE INSERT on users
+	FOR EACH ROW
+DECLARE
+	var users.reg_date%type;
+BEGIN
+	select sysdate into var from dual;
+	:new.reg_date:=var;
+END;
+/	
+
+--THIS FUNCTION SHOWS THE YEARLY REVENUE OF AN USER
+CREATE OR REPLACE FUNCTION show_revenue
+(uid yearly_revenue.user_id%type)
+RETURN yearly_revenue.amount%type IS
+ret_value yearly_revenue.amount%type;
+BEGIN
+	select sum(amount) into ret_value 
+	from yearly_revenue where yearly_revenue.user_id=uid;
+	RETURN ret_value;
+END show_revenue;
+/
+
+BEGIN
+
+add_users('U-1','Nahin',1909001,10000000.25);
+add_users('U-5','Joita',1909005,100234.25);
+add_users('U-13','Alvi',1909013, 123451.54);
+add_users('U-22', 'Nihima',1909022,54102.75);
+add_users('U-44','Sumit', 1909043,500000.29);
+add_users('U-46','Ruponty', 1909046,525000.65);
+add_users('U-47','Robins', 1909047,9401011.65);
+add_users('U-48','Tuba', 1909048,876301.65);
+add_users('U-49','Fahad', 1909049,606301.65);
+
+
+
+add_stock_exchange('101','DSE','10:00 AM','1:00 PM');
+add_stock_exchange('102','CHITTOGONG Stock Exchange','11:00 AM','2:00 PM');
+add_stock_exchange('103','NEWYORK Stock Exchange','11:00 AM','2:00 PM');
+add_stock_exchange('104','London Stock Exchange','11:00 AM','2:00 PM');
+add_stock_exchange('105','National Stock Exchange of INDIA','12:00 AM','4:00 PM');
+add_stock_exchange('106','Colombo Stock Exchange','10:05 AM','10:05 AM');
+
+
+add_company_stock('C-1','Exim Bank');
+add_company_stock('C-2','BRAC Bank');
+add_company_stock('C-3','TESLA');
+add_company_stock('C-4','FORD');
+add_company_stock('C-5','JANATA Bank');
+add_company_stock('C-6','Square');
+add_company_stock('C-7','APEX');
+add_company_stock('C-8','FACEBOOK');
+add_company_stock('C-100','TO BE DELETED');
+
+add_offer_to_sell('101','C-1',101.1,10000);
+add_offer_to_sell('102','C-1',97.5,20000);
+add_offer_to_sell('103','C-3',1000,5000);
+add_offer_to_sell('104','C-4',975,7000);
+add_offer_to_sell('102','C-2',75,15000);
+add_offer_to_sell('104','C-6',401,15750);
+add_offer_to_sell('101','C-7',98,100000);
+add_offer_to_sell('103','C-8',947,23033);
+
+add_owned_stock('TESLA',1000,990,'U-1','103','C-3');
+add_owned_stock('APEX',5000,70,'U-5','101','C-7');
+add_owned_stock('Square',1400,350,'U-13','104','C-6');
+add_owned_stock('TESLA',1000,970,'U-44','103','C-3');
+add_owned_stock('BRAC Bank',700,90,'U-48','102','C-2');
+add_owned_stock('FACEBOOK',300,800,'U-1','103','C-8');
+
+
+
+add_yearly_revenue(12540.5,'U-1','C-3','103'); 
+add_yearly_revenue(20045,'U-5','C-7','101');
+add_yearly_revenue(12761,'U-13','C-6','104');
+add_yearly_revenue(14292.5,'U-44','C-3','103');
+add_yearly_revenue(5000,'U-48','C-2','102');
+add_yearly_revenue(10342,'U-1','C-8','103');
+END;
+/
+
+--DESCRIBE COMMAND
+DESCRIBE Stock_Exchange;
+DESCRIBE USERS;
+DESCRIBE company_stock;
+DESCRIBE owned_stock;
+DESCRIBE buy_sell;
+DESCRIBE offer_to_sell;
+DESCRIBE yearly_revenue;
+
+--SELECT * COMMAND
+select * from Stock_Exchange;
+select * from USERS;
+select * from company_stock;
+select * from owned_stock;
+select * from buy_sell;
+select * from offer_to_sell;
+select * from yearly_revenue;
