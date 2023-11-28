@@ -1,5 +1,3 @@
-
-
 drop TRIGGER update_date_users;
 drop TRIGGER check_buy_sell;
 drop procedure add_users;
